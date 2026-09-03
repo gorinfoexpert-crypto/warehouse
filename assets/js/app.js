@@ -516,11 +516,288 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Products Catalog State with Pagination
+    const productsTableState = {
+        page: 1,
+        pageSize: '50',
+        filterStock: 'ALL',
+        searchTerm: '',
+        sortCol: null,
+        sortDir: 'asc',
+        initialized: false
+    };
+
+    /**
+     * Render Products Catalog Table with Pagination and Filters
+     */
+    function renderProductsTable() {
+        const tbody = document.getElementById('productsTableBody');
+        const badgeTotal = document.getElementById('productsTotalBadge');
+        const paginationInfo = document.getElementById('productsPaginationInfo');
+        const paginationControls = document.getElementById('productsPaginationControls');
+        if (!tbody) return;
+
+        // 1. Filter products
+        let list = [...(cachedProducts || [])];
+        const term = (productsTableState.searchTerm || '').toLowerCase();
+        const filter = productsTableState.filterStock;
+
+        if (term) {
+            list = list.filter(p => 
+                (p.name && p.name.toLowerCase().includes(term)) ||
+                (p.sku && p.sku.toLowerCase().includes(term)) ||
+                String(p.bitrix_product_id).includes(term)
+            );
+        }
+
+        if (filter === 'IN_STOCK') {
+            list = list.filter(p => parseFloat(p.current_stock || 0) > 0);
+        } else if (filter === 'RESERVED') {
+            list = list.filter(p => parseFloat(p.reserved_stock || 0) > 0);
+        } else if (filter === 'LOW_STOCK') {
+            list = list.filter(p => parseFloat(p.free_stock || 0) <= parseFloat(p.min_stock || 0));
+        } else if (filter === 'ZERO_STOCK') {
+            list = list.filter(p => parseFloat(p.free_stock || 0) <= 0);
+        }
+
+        // 2. Sort products if sort column is active
+        if (productsTableState.sortCol) {
+            const col = productsTableState.sortCol;
+            const isDesc = productsTableState.sortDir === 'desc';
+            list.sort((a, b) => {
+                let valA = a[col];
+                let valB = b[col];
+
+                if (col === 'id') { valA = parseInt(a.bitrix_product_id, 10); valB = parseInt(b.bitrix_product_id, 10); }
+                else if (col === 'name') { return isDesc ? (b.name || '').localeCompare(a.name || '') : (a.name || '').localeCompare(b.name || ''); }
+                else if (col === 'sku') { return isDesc ? (b.sku || '').localeCompare(a.sku || '') : (a.sku || '').localeCompare(b.sku || ''); }
+                else if (col === 'current_stock') { valA = parseFloat(a.current_stock || 0); valB = parseFloat(b.current_stock || 0); }
+                else if (col === 'reserved_stock') { valA = parseFloat(a.reserved_stock || 0); valB = parseFloat(b.reserved_stock || 0); }
+                else if (col === 'free_stock') { valA = parseFloat(a.free_stock || 0); valB = parseFloat(b.free_stock || 0); }
+                else if (col === 'incoming') { valA = parseFloat(a.total_incoming_confirmed || 0); valB = parseFloat(b.total_incoming_confirmed || 0); }
+                else if (col === 'min_stock') { valA = parseFloat(a.min_stock || 0); valB = parseFloat(b.min_stock || 0); }
+                else if (col === 'delivery_days') { valA = parseInt(a.delivery_days || 0, 10); valB = parseInt(b.delivery_days || 0, 10); }
+                else if (col === 'price') { valA = parseFloat(a.price || 0); valB = parseFloat(b.price || 0); }
+
+                if (valA < valB) return isDesc ? 1 : -1;
+                if (valA > valB) return isDesc ? -1 : 1;
+                return 0;
+            });
+        }
+
+        const totalCount = list.length;
+        if (badgeTotal) {
+            badgeTotal.textContent = `${totalCount.toLocaleString('hy-AM')} ապրանք`;
+        }
+
+        // 3. Pagination calculation
+        const isAll = productsTableState.pageSize === 'ALL';
+        const size = isAll ? Math.max(1, totalCount) : parseInt(productsTableState.pageSize, 10);
+        const totalPages = Math.max(1, Math.ceil(totalCount / size));
+
+        if (productsTableState.page > totalPages) productsTableState.page = totalPages;
+        if (productsTableState.page < 1) productsTableState.page = 1;
+
+        const startIdx = (productsTableState.page - 1) * size;
+        const endIdx = isAll ? totalCount : Math.min(startIdx + size, totalCount);
+        const pageItems = isAll ? list : list.slice(startIdx, endIdx);
+
+        // 4. Render HTML rows
+        if (pageItems.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--ga-text-muted); padding: 30px;">Ապրանքներ չեն գտնվել տրված ֆիլտրերով</td></tr>`;
+        } else {
+            let html = '';
+            pageItems.forEach(p => {
+                const freeStock = parseFloat(p.free_stock);
+                const freeClass = freeStock > 0 ? 'color: var(--b24-success-dark); font-weight: 700;' : 'color: var(--b24-danger); font-weight: 700;';
+                const unit = p.unit || 'հատ';
+                const minStock = parseFloat(p.min_stock || 0);
+                const delDays = parseInt(p.delivery_days || 7, 10);
+                const isAlert = freeStock <= minStock;
+
+                html += `
+                    <tr>
+                        <td><span class="badge badge-muted">#${p.bitrix_product_id}</span></td>
+                        <td><strong>${escapeHtml(p.name)}</strong></td>
+                        <td><code>${escapeHtml(p.sku || '-')}</code></td>
+                        <td class="text-right">${p.current_stock} ${unit}</td>
+                        <td class="text-right" style="color: var(--b24-warning-dark);">${p.reserved_stock} ${unit}</td>
+                        <td class="text-right" style="${freeClass}">${p.free_stock} ${unit}</td>
+                        <td class="text-right" style="color: var(--b24-info);">+${p.total_incoming_confirmed} ${unit}</td>
+                        <td class="text-right">
+                            <span class="${isAlert ? 'badge badge-warning' : ''}" style="${isAlert ? 'font-weight:700;' : ''}">
+                                ${minStock} ${unit}
+                            </span>
+                        </td>
+                        <td class="text-right"><strong>${delDays} օր</strong></td>
+                        <td class="text-right"><strong>${parseFloat(p.price).toLocaleString('hy-AM')} ֏</strong></td>
+                        <td style="text-align: center;">
+                            <button class="btn btn-secondary btn-sm edit-threshold-btn" data-id="${p.bitrix_product_id}" data-name="${escapeHtml(p.name)}" data-min="${minStock}" data-max="${p.max_stock || 0}" data-days="${delDays}" title="Կարգավորել նվազագույն շեմն ու մատակարարման օրերը">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                Փոխել
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+            if (window.applyTablePreferences) window.applyTablePreferences('productsTable');
+
+            // Bind threshold edit modal trigger
+            tbody.querySelectorAll('.edit-threshold-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.getAttribute('data-id');
+                    const name = btn.getAttribute('data-name');
+                    const min = btn.getAttribute('data-min');
+                    const max = btn.getAttribute('data-max');
+                    const days = btn.getAttribute('data-days');
+
+                    document.getElementById('editProductBitrixId').value = id;
+                    document.getElementById('editProductName').value = name;
+                    document.getElementById('editProductMinStock').value = min;
+                    document.getElementById('editProductMaxStock').value = max;
+                    document.getElementById('editProductDeliveryDays').value = days;
+
+                    document.getElementById('editProductModal').classList.add('active');
+                });
+            });
+        }
+
+        // 5. Update Pagination Info
+        if (paginationInfo) {
+            if (totalCount === 0) {
+                paginationInfo.textContent = 'Արդյունքներ չկան';
+            } else {
+                paginationInfo.textContent = `Ցուցադրված է ${startIdx + 1} - ${endIdx} (ընդհանուր՝ ${totalCount.toLocaleString('hy-AM')} ապրանք)`;
+            }
+        }
+
+        // 6. Render Pagination Controls
+        if (paginationControls) {
+            if (isAll || totalPages <= 1) {
+                paginationControls.innerHTML = '';
+                return;
+            }
+
+            let btnHtml = '';
+            // Prev button
+            btnHtml += `<button class="btn btn-secondary btn-sm" id="btnProdPagePrev" ${productsTableState.page <= 1 ? 'disabled' : ''} style="padding: 2px 8px; height: 24px;">«</button>`;
+
+            // Page numbers sliding window
+            const maxButtons = 5;
+            let startPage = Math.max(1, productsTableState.page - 2);
+            let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+            if (endPage - startPage < maxButtons - 1) {
+                startPage = Math.max(1, endPage - maxButtons + 1);
+            }
+
+            if (startPage > 1) {
+                btnHtml += `<button class="btn btn-secondary btn-sm prod-page-num-btn" data-p="1" style="padding: 2px 8px; height: 24px;">1</button>`;
+                if (startPage > 2) btnHtml += `<span style="color: #999; padding: 0 2px;">...</span>`;
+            }
+
+            for (let pNum = startPage; pNum <= endPage; pNum++) {
+                const activeStyle = pNum === productsTableState.page ? 'background-color: var(--ga-blue); color: #fff; border-color: var(--ga-blue); font-weight: 700;' : '';
+                btnHtml += `<button class="btn btn-secondary btn-sm prod-page-num-btn" data-p="${pNum}" style="padding: 2px 8px; height: 24px; ${activeStyle}">${pNum}</button>`;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) btnHtml += `<span style="color: #999; padding: 0 2px;">...</span>`;
+                btnHtml += `<button class="btn btn-secondary btn-sm prod-page-num-btn" data-p="${totalPages}" style="padding: 2px 8px; height: 24px;">${totalPages}</button>`;
+            }
+
+            // Next button
+            btnHtml += `<button class="btn btn-secondary btn-sm" id="btnProdPageNext" ${productsTableState.page >= totalPages ? 'disabled' : ''} style="padding: 2px 8px; height: 24px;">»</button>`;
+
+            paginationControls.innerHTML = btnHtml;
+
+            // Bind Pagination Button Clicks
+            const btnPrev = document.getElementById('btnProdPagePrev');
+            if (btnPrev) {
+                btnPrev.addEventListener('click', () => {
+                    if (productsTableState.page > 1) {
+                        productsTableState.page--;
+                        renderProductsTable();
+                    }
+                });
+            }
+
+            const btnNext = document.getElementById('btnProdPageNext');
+            if (btnNext) {
+                btnNext.addEventListener('click', () => {
+                    if (productsTableState.page < totalPages) {
+                        productsTableState.page++;
+                        renderProductsTable();
+                    }
+                });
+            }
+
+            paginationControls.querySelectorAll('.prod-page-num-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const targetPage = parseInt(btn.getAttribute('data-p'), 10);
+                    if (targetPage && targetPage !== productsTableState.page) {
+                        productsTableState.page = targetPage;
+                        renderProductsTable();
+                    }
+                });
+            });
+        }
+    }
+
+    /**
+     * Initialize Event Listeners for Products Table Controls
+     */
+    function initProductsTableControls() {
+        if (productsTableState.initialized) return;
+        productsTableState.initialized = true;
+
+        const pageSizeSelect = document.getElementById('productsPageSize');
+        if (pageSizeSelect) {
+            pageSizeSelect.addEventListener('change', (e) => {
+                productsTableState.pageSize = e.target.value;
+                productsTableState.page = 1;
+                renderProductsTable();
+            });
+        }
+
+        const filterStockSelect = document.getElementById('productsFilterStock');
+        if (filterStockSelect) {
+            filterStockSelect.addEventListener('change', (e) => {
+                productsTableState.filterStock = e.target.value;
+                productsTableState.page = 1;
+                renderProductsTable();
+            });
+        }
+
+        const searchInput = document.getElementById('productsSearchInput');
+        if (searchInput) {
+            let searchTimeout = null;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    productsTableState.searchTerm = e.target.value.trim().toLowerCase();
+                    productsTableState.page = 1;
+                    renderProductsTable();
+                }, 200);
+            });
+        }
+
+        // Enhance with universal sorting / drag & drop / column visibility
+        if (window.enhanceTable) {
+            window.enhanceTable('productsTable', {
+                onSort: (colKey, direction) => {
+                    productsTableState.sortCol = direction === 'neutral' ? null : colKey;
+                    productsTableState.sortDir = direction;
+                    renderProductsTable();
+                }
+            });
+        }
+    }
+
     /**
      * Load Products Catalog
      */
     async function loadProducts() {
-        const tbody = document.getElementById('productsTableBody');
         const selectSim = document.getElementById('simProductSelect');
         const selectShipment = document.getElementById('newShipmentProduct');
         const selectRes = document.getElementById('newResProduct');
@@ -532,64 +809,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!data.success) return;
             cachedProducts = data.products;
 
-            // Populate Table
-            if (tbody) {
-                let html = '';
-                cachedProducts.forEach(p => {
-                    const freeStock = parseFloat(p.free_stock);
-                    const freeClass = freeStock > 0 ? 'color: var(--b24-success-dark); font-weight: 700;' : 'color: var(--b24-danger); font-weight: 700;';
-                    const unit = p.unit || 'հատ';
-                    const minStock = parseFloat(p.min_stock || 0);
-                    const delDays = parseInt(p.delivery_days || 7, 10);
-                    const isAlert = freeStock <= minStock;
-
-                    html += `
-                        <tr>
-                            <td><span class="badge badge-muted">#${p.bitrix_product_id}</span></td>
-                            <td><strong>${escapeHtml(p.name)}</strong></td>
-                            <td><code>${escapeHtml(p.sku || '-')}</code></td>
-                            <td>${p.current_stock} ${unit}</td>
-                            <td style="color: var(--b24-warning-dark);">${p.reserved_stock} ${unit}</td>
-                            <td style="${freeClass}">${p.free_stock} ${unit}</td>
-                            <td style="color: var(--b24-info);">+${p.total_incoming_confirmed} ${unit}</td>
-                            <td>
-                                <span class="${isAlert ? 'badge badge-warning' : ''}" style="${isAlert ? 'font-weight:700;' : ''}">
-                                    ${minStock} ${unit}
-                                </span>
-                            </td>
-                            <td><strong>${delDays} օր</strong></td>
-                            <td><strong>${parseFloat(p.price).toLocaleString('hy-AM')} ֏</strong></td>
-                            <td style="text-align: center;">
-                                <button class="btn btn-secondary btn-sm edit-threshold-btn" data-id="${p.bitrix_product_id}" data-name="${escapeHtml(p.name)}" data-min="${minStock}" data-max="${p.max_stock || 0}" data-days="${delDays}" title="Կարգավորել նվազագույն շեմն ու մատակարարման օրերը">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                                    Փոխել
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                });
-                tbody.innerHTML = html;
-                if (window.applyTablePreferences) window.applyTablePreferences('productsTable');
-
-                // Bind threshold edit modal trigger
-                tbody.querySelectorAll('.edit-threshold-btn').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        const id = btn.getAttribute('data-id');
-                        const name = btn.getAttribute('data-name');
-                        const min = btn.getAttribute('data-min');
-                        const max = btn.getAttribute('data-max');
-                        const days = btn.getAttribute('data-days');
-
-                        document.getElementById('editProductBitrixId').value = id;
-                        document.getElementById('editProductName').value = name;
-                        document.getElementById('editProductMinStock').value = min;
-                        document.getElementById('editProductMaxStock').value = max;
-                        document.getElementById('editProductDeliveryDays').value = days;
-
-                        document.getElementById('editProductModal').classList.add('active');
-                    });
-                });
-            }
+            initProductsTableControls();
+            renderProductsTable();
 
             // Populate Dropdowns
             const populateSelect = (selectEl) => {
