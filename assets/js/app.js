@@ -406,6 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
             });
             usersTbody.innerHTML = html;
+            if (window.applyTablePreferences) window.applyTablePreferences('usersTable');
 
             // Bind user role change
             document.querySelectorAll('.user-role-select').forEach(sel => {
@@ -568,6 +569,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     `;
                 });
                 tbody.innerHTML = html;
+                if (window.applyTablePreferences) window.applyTablePreferences('productsTable');
 
                 // Bind threshold edit modal trigger
                 tbody.querySelectorAll('.edit-threshold-btn').forEach(btn => {
@@ -868,6 +870,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             tbody.innerHTML = html;
+            if (window.applyTablePreferences) window.applyTablePreferences('shipmentsTable');
             bindShipmentActions();
 
         } catch (e) {
@@ -1012,6 +1015,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             tbody.innerHTML = html;
+            if (window.applyTablePreferences) window.applyTablePreferences('reservationsTable');
             bindReservationActions();
 
         } catch (e) {
@@ -2084,6 +2088,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </tr>
                         `;
                     }).join('');
+                    if (window.applyTablePreferences) window.applyTablePreferences('dashProductTable');
                 }
 
                 // Update Pagination Info
