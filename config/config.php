@@ -22,9 +22,6 @@ define('DB_NAME', 'sklad_bitrix');
 define('DB_USER', 'root');
 define('DB_PASSWORD', '');
 
-// Bitrix24 default webhook (can also be saved in database settings table)
-define('BITRIX_WEBHOOK_URL', 'https://buyonline.bitrix24.ru/rest/47141/f1nw0e0nq54qc6ln/'); 
-define('BITRIX_DOMAIN', 'buyonline.bitrix24.ru');
 
 // Reservation TTL in days (auto-expire unconfirmed reservations)
 define('DEFAULT_RESERVATION_TTL_DAYS', 7);
